@@ -37,6 +37,11 @@ def _load_rf_analysis():
     const = types.ModuleType("rfdm.const")
     const.IDLE_TRIM_US = 20_000
     const.MIN_SIGNAL_PULSES = 8
+    const.PROTOCOL_B0 = "b0"
+    const.PROTOCOL_BINARY = "binary"
+    const.PROTOCOL_PRONTO = "pronto"
+    const.PROTOCOL_RAW = "raw"
+    const.PROTOCOL_TRISTATE = "tristate"
     sys.modules["rfdm.const"] = const
 
     for name in ("decoders", "rf_analysis"):
@@ -245,10 +250,345 @@ check(
     "B0: compact (no-space) form parsed differently",
 )
 
+
 # ---------------------------------------------------------------------------
+# 6. Learned command candidates are noise-ranked but returned in first-seen
+#    order, so fixed rotating-code sequences can be stored faithfully.
+# ---------------------------------------------------------------------------
+
+learn_captures = [
+    types.SimpleNamespace(
+        received_at=1.0, analysis={"bits": "CODE_A", "times_seen": 4}
+    ),
+    types.SimpleNamespace(
+        received_at=2.0, analysis={"bits": "NOISE", "times_seen": 1}
+    ),
+    types.SimpleNamespace(
+        received_at=3.0, analysis={"bits": "CODE_C", "times_seen": 9}
+    ),
+    types.SimpleNamespace(
+        received_at=4.0, analysis={"bits": "CODE_A", "times_seen": 2}
+    ),
+]
+learned = rf_analysis.cluster_learn_signals(learn_captures, max_signals=2)
+check(
+    [signal.analysis["bits"] for signal in learned] == ["CODE_A", "CODE_C"],
+    "Learning: strongest candidates were not returned in first-seen order",
+)
+check(
+    learned[0].analysis["times_seen"] == 6,
+    "Learning: duplicate captures were not counted into their cluster",
+)
+
+# ---------------------------------------------------------------------------
+# 7. Manual multi-variant parsing preserves entry order across all formats.
+# ---------------------------------------------------------------------------
+
+raw_variants = rf_analysis.parse_manual_variants(
+    "raw",
+    [
+        "100, -300, 100, -300, 100, -300, 100, -300",
+        "200, -400, 200, -400, 200, -400, 200, -400",
+    ],
+)
+check(len(raw_variants) == 2, "Manual raw: expected two variants")
+check(
+    raw_variants[0][0] == [100, -300, 100, -300, 100, -300, 100, -300]
+    and raw_variants[1][0] == [200, -400, 200, -400, 200, -400, 200, -400],
+    "Manual raw: variants or their order changed",
+)
+
+tri_codes = ["0F1F0011", "1F0F1100"]
+tri_variants = rf_analysis.parse_manual_variants(
+    "tristate", tri_codes, pulse_length=380, protocol=4
+)
+check(len(tri_variants) == 2, "Manual tri-state: expected two variants")
+check(
+    [code for _timings, code in tri_variants] == tri_codes,
+    "Manual tri-state: code values or order changed",
+)
+
+binary_codes = [
+    "101010101010101010101010",
+    "101010101010101010101011",
+    "101010101010101010101100",
+    "101010101010101010101101",
+]
+binary_variants = rf_analysis.parse_manual_variants(
+    "binary", binary_codes, pulse_length=380, protocol=4
+)
+check(len(binary_variants) == 4, "Manual binary: expected four variants")
+check(
+    [code for _timings, code in binary_variants] == binary_codes,
+    "Manual binary: code values or order changed",
+)
+check(
+    [rf_analysis.analyze(timings).get("bits") for timings, _code in binary_variants]
+    == binary_codes,
+    "Manual binary: encoded variants did not decode back to their original bits",
+)
+
+B1 = B0.replace("AA B0 4C 04 08 ", "AA B1 04 ", 1)
+b0_variants = rf_analysis.parse_manual_variants("b0", [B0, B1])
+check(
+    len(b0_variants) == 2 and b0_variants[0][0] == b0_variants[1][0],
+    "Manual B0/B1: multiple variants were not parsed equivalently",
+)
+
+PRONTO = "0000 006D 0004 0000 0010 0020 0010 0020 0010 0020 0010 0020"
+PRONTO_0100 = PRONTO.replace("0000", "0100", 1)
+pronto_variants = rf_analysis.parse_manual_variants(
+    "pronto", [PRONTO, PRONTO_0100]
+)
+check(
+    len(pronto_variants) == 2 and pronto_variants[0][0] == pronto_variants[1][0],
+    "Manual Pronto: 0000/0100 formats were not parsed equivalently",
+)
+
+try:
+    rf_analysis.parse_manual_variants("binary", [])
+except rf_analysis.RFInputError as err:
+    check(
+        err.error_key == "manual_variant_required",
+        "Manual variants: empty list returned the wrong error",
+    )
+else:
+    check(False, "Manual variants: accepted an empty list")
+
+try:
+    rf_analysis.parse_manual_variants("binary", ["1010", ""])
+except rf_analysis.RFInputError as err:
+    check(
+        err.error_key == "manual_variant_required",
+        "Manual variants: empty-entry validation returned the wrong error",
+    )
+else:
+    check(False, "Manual variants: accepted an empty variant")
+
+# ---------------------------------------------------------------------------
+# 8. Every exposed rc-switch protocol must round-trip through the encoder and
+#    structural decoder. Protocol 6 is intentionally not in RC_PROTOCOLS.
+# ---------------------------------------------------------------------------
+
+ROTATING_BITS = "101010101010101010101010"
+
+for protocol in rf_analysis.RC_PROTOCOLS:
+    encoded = rf_analysis.encode_binary(
+        ROTATING_BITS, pulse_length=None, protocol=protocol
+    )
+    decoded = rf_analysis.analyze(encoded)
+    check(
+        decoded.get("bits") == ROTATING_BITS,
+        f"rc-switch P{protocol}: binary bits did not round-trip",
+    )
+    if protocol in {1, 2, 4, 5, 7}:
+        check(
+            decoded.get("protocol_guess") == protocol,
+            f"rc-switch P{protocol}: expected protocol guess {protocol}, "
+            f"got {decoded.get('protocol_guess')!r}",
+        )
+
+    tristate_code = "0F1F00110F1F"
+    tristate_timings = rf_analysis.encode_tristate(
+        tristate_code, protocol=protocol
+    )
+    tristate_decoded = rf_analysis.analyze(tristate_timings)
+    check(
+        tristate_decoded.get("bits")
+        == "".join(rf_analysis.TRISTATE_TO_BITS[symbol] for symbol in tristate_code),
+        f"rc-switch P{protocol}: tri-state bits did not round-trip",
+    )
+    if protocol in {1, 2, 4, 5, 7}:
+        check(
+            tristate_decoded.get("protocol_guess") == protocol,
+            f"rc-switch P{protocol}: tri-state protocol guess was "
+            f"{tristate_decoded.get('protocol_guess')!r}",
+        )
+
+try:
+    rf_analysis.encode_binary(ROTATING_BITS, protocol=6)
+except rf_analysis.RFInputError as err:
+    check(
+        err.error_key == "invalid_protocol",
+        "rc-switch P6: unsupported protocol returned the wrong error",
+    )
+else:
+    check(False, "rc-switch P6: unsupported protocol was accepted")
+
+# Repeated receptions of one capture cluster are not multiple command variants.
+check(
+    "variants" not in learned[0].analysis,
+    "Learning: repeated receptions were mislabeled as command variants",
+)
+
+# 9. The rc-switch Protocol 4 encoder uses a 2,280 µs sync space. It must
+#    split its four 24-bit frames with the verified 2,000 µs threshold.
+# ---------------------------------------------------------------------------
+
+rotating_timings = rf_analysis.encode_binary(
+    ROTATING_BITS, pulse_length=380, protocol=4
+)
+rotating_frames = rf_analysis.split_frames(rotating_timings)
+rotating_analysis = rf_analysis.analyze(rotating_timings)
+check(
+    len(rotating_frames) == 4,
+    f"2.28ms sync: expected 4 frames, got {len(rotating_frames)}",
+)
+check(
+    rotating_analysis.get("bits") == ROTATING_BITS
+    and rotating_analysis.get("bit_count") == 24
+    and rotating_analysis.get("protocol_guess") == 4,
+    f"2.28ms sync: expected decoded 24-bit code, got {rotating_analysis.get('bits')!r}",
+)
+
+# ---------------------------------------------------------------------------
+# 10. Actual RC-Switch Protocol 4 frames from five keypresses on the user's
+#    SURNICE remote. These are the first complete 24-bit frame (including
+#    its sync pair) from each real ESPHome Received Raw capture. The full
+#    captures contain many repetitions of the same frame; one per press is
+#    sufficient here to preserve the real timings while covering all codes.
+# ---------------------------------------------------------------------------
+
+REMOTE_P4_CASES = {
+    "keypress 1": (
+        parse("""
+        1156, -342, 400, -1072, 391, -1099, 1124, -371, 1102, -365,
+        400, -1069, 387, -1090, 1126, -365, 1128, -351, 1115, -357,
+        380, -1116, 1112, -372, 369, -1098, 400, -1075, 1125, -355,
+        390, -1091, 1130, -363, 373, -1101, 1115, -372, 369, -1096,
+        1129, -342, 386, -1114, 1128, -338, 399, -1102, 363, -2216
+        """),
+        "100110011101001010101010",
+    ),
+    "keypress 2": (
+        parse("""
+        927, -369, 363, -1114, 372, -1110, 1123, -362, 1122, -343,
+        1128, -366, 371, -1101, 1114, -366, 1140, -342, 381, -1114,
+        1114, -361, 390, -1076, 1133, -365, 373, -1093, 398, -1094,
+        1123, -363, 371, -1092, 399, -1092, 1123, -363, 371, -1092,
+        1141, -341, 389, -1091, 1123, -364, 384, -1099, 386, -2199
+        """),
+        "100111011010100100101010",
+    ),
+    "keypress 3": (
+        parse("""
+        1072, -385, 370, -1116, 359, -1119, 1113, -360, 388, -1106,
+        369, -1098, 364, -1118, 366, -1126, 359, -1122, 367, -1116,
+        359, -1122, 364, -1092, 1120, -365, 397, -1086, 366, -1115,
+        369, -1115, 370, -1122, 370, -1093, 370, -1116, 1122, -353,
+        1120, -367, 368, -1128, 1098, -374, 366, -1116, 370, -2211
+        """),
+        "100100000000100000011010",
+    ),
+    "keypress 4": (
+        parse("""
+        1112, -336, 395, -1099, 370, -1116, 1115, -368, 363, -1118,
+        367, -1109, 372, -1100, 1116, -357, 1143, -364, 366, -1099,
+        385, -1094, 1133, -363, 371, -1089, 1135, -355, 391, -1091,
+        1117, -366, 1113, -370, 388, -1094, 382, -1101, 1114, -370,
+        1121, -366, 374, -1100, 1116, -359, 390, -1108, 369, -2203
+        """),
+        "100100011001010110011010",
+    ),
+    "keypress 5": (
+        parse("""
+        1036, -391, 361, -1112, 368, -1110, 1096, -376, 1116, -368,
+        367, -1124, 360, -1121, 1092, -394, 1095, -366, 1120, -364,
+        375, -1117, 1110, -380, 368, -1090, 369, -1115, 1120, -379,
+        368, -1092, 1122, -366, 366, -1121, 1116, -369, 367, -1098,
+        1115, -368, 386, -1096, 1122, -369, 365, -1117, 368, -2209
+        """),
+        "100110011101001010101010",
+    ),
+}
+
+REMOTE_P4_FINGERPRINTS = {}
+for keypress, (captured_frame, expected_bits) in REMOTE_P4_CASES.items():
+    result = rf_analysis.analyze(captured_frame)
+    REMOTE_P4_FINGERPRINTS[keypress] = result.get("fingerprint")
+    check(
+        len(captured_frame) == 50,
+        f"{keypress}: expected 24 data pairs plus sync pair "
+        f"(50 timings), got {len(captured_frame)}",
+    )
+    check(
+        result.get("encoding") == "pwm"
+        and result.get("protocol_guess") == 4,
+        f"{keypress}: expected RC-Switch Protocol 4, got "
+        f"{result.get('encoding')!r}/P{result.get('protocol_guess')!r}",
+    )
+    check(
+        result.get("bits") == expected_bits and result.get("bit_count") == 24,
+        f"{keypress}: expected 24-bit code {expected_bits}, got "
+        f"{result.get('bits')!r}",
+    )
+    check(
+        isinstance(result.get("fingerprint"), str)
+        and result["fingerprint"].startswith("24b:"),
+        f"{keypress}: expected a bit-based 24-bit fingerprint",
+    )
+
+check(
+    REMOTE_P4_FINGERPRINTS["keypress 1"]
+    == REMOTE_P4_FINGERPRINTS["keypress 5"],
+    "Remote Protocol 4: repeated keypress code did not produce the same fingerprint",
+)
+check(
+    len(set(REMOTE_P4_FINGERPRINTS.values())) == 4,
+    "Remote Protocol 4: expected four distinct fingerprints across five keypresses",
+)
+
+# ---------------------------------------------------------------------------
+# 11. Synthetic RC-Switch Protocol 8 frame-splitting regression.
+#
+# This is deliberately synthetic, not a measured remote capture. P8 has
+# legitimate 16T data LOWs (3,200 µs at T=200 µs), longer than the
+# 2,000 µs absolute floor. The P95 * 1.7 term must raise the threshold to
+# 5,440 µs so those data spaces stay inside their frames; only the 130T
+# sync LOWs (26,000 µs) may terminate frames.
+# ---------------------------------------------------------------------------
+
+PROTOCOL_8_BITS = "101010101010101010101010"
+protocol_8_timings = rf_analysis.encode_binary(
+    PROTOCOL_8_BITS, pulse_length=200, protocol=8, frames=4
+)
+protocol_8_absolutes = sorted(abs(value) for value in protocol_8_timings)
+protocol_8_p95 = protocol_8_absolutes[
+    int(0.95 * (len(protocol_8_absolutes) - 1))
+]
+protocol_8_adaptive = rf_analysis._FRAME_GAP_FACTOR * protocol_8_p95
+protocol_8_threshold = max(
+    rf_analysis._FRAME_GAP_MIN_US, protocol_8_adaptive
+)
+protocol_8_frames = rf_analysis.split_frames(protocol_8_timings)
+
+check(
+    protocol_8_p95 == 3_200,
+    f"Synthetic Protocol 8: expected P95=3,200 µs, got {protocol_8_p95}",
+)
+check(
+    protocol_8_threshold == 5_440,
+    f"Synthetic Protocol 8: expected adaptive threshold=5,440 µs, got "
+    f"{protocol_8_threshold}",
+)
+check(
+    protocol_8_threshold > 3_200,
+    "Synthetic Protocol 8: threshold must remain above its 3,200 µs data LOW",
+)
+check(
+    len(protocol_8_frames) == 4
+    and all(len(frame) == 50 for frame in protocol_8_frames),
+    "Synthetic Protocol 8: 3,200 µs data LOWs were mistaken for frame gaps "
+    f"(got {len(protocol_8_frames)} frames with lengths "
+    f"{[len(frame) for frame in protocol_8_frames]})",
+)
+check(
+    all(frame[-1] == -26_000 for frame in protocol_8_frames),
+    "Synthetic Protocol 8: expected each frame to end at its 26,000 µs sync LOW",
+)
 
 if failures:
     print("\nFAILURES:")
     print("\n".join(failures))
     sys.exit(1)
-print("\nOK: all decoder tests passed")
+print("\nOK: all decoder and manual-input tests passed")

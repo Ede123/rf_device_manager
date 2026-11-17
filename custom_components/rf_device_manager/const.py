@@ -15,7 +15,7 @@ MODEL = "Virtual RF device"
 
 STORAGE_KEY = DOMAIN
 STORAGE_VERSION = 1
-STORAGE_MINOR_VERSION = 1
+STORAGE_MINOR_VERSION = 2
 STORAGE_SAVE_DELAY = 1.0  # seconds, debounce for Store.async_delay_save
 
 # ---------------------------------------------------------------------------
@@ -155,7 +155,7 @@ FREQUENCY_PRESET_CUSTOM = "custom"
 # ---------------------------------------------------------------------------
 
 DEFAULT_LEARN_TIMEOUT = 30.0  # seconds to wait for the first signal
-LEARN_COLLECT_WINDOW = 4.0  # seconds to keep collecting after the first signal
+LEARN_COLLECT_WINDOW = 10.0  # seconds to keep collecting after the first signal
 LEARN_MAX_SIGNALS = 8  # distinct signals kept per learning session
 MIN_SIGNAL_PULSES = 8  # ignore captures shorter than this many edges
 
@@ -167,8 +167,9 @@ DEFAULT_REPEAT = 0  # extra repeats when re-sending a stored command
 # repeats = 8 frames on air (~0.5-1 s), matching a short button press.
 DEFAULT_SEND_REPEAT = 7
 
-# Interval used by the receiver hub to (re-)attach to ESPHome API clients,
-# picking up reconnects and newly added nodes.
+# Interval used to notice ESPHome entries loaded while the receiver hub is
+# active and to retry failed discovery/subscription attempts. Connection
+# reconnects are handled immediately through ESPHome runtime-data callbacks.
 RECEIVER_MAINTENANCE_INTERVAL = 30  # seconds
 
 # ---------------------------------------------------------------------------
