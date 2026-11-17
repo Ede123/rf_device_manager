@@ -8,8 +8,8 @@ services mutate devices/codes exclusively through this manager.
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, field
 import logging
+from dataclasses import dataclass, field
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
