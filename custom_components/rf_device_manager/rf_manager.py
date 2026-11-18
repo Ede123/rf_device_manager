@@ -219,7 +219,6 @@ class ReceiverHub:
         self._esphome_discovery_failures: dict[str, int] = {}
         self._esphome_subscription_failures: dict[str, int] = {}
         self._esphome_receive_api_missing: set[str] = set()
-        self._esphome_connection_callback_missing: set[str] = set()
         self._bus_unsub: CALLBACK_TYPE | None = None
         self._timer_unsub: CALLBACK_TYPE | None = None
         self._cached_names: list[str] = []
@@ -306,7 +305,6 @@ class ReceiverHub:
             | set(self._esphome_disconnect_callbacks)
             | set(self._esphome_unsubs)
             | set(self._esphome_device_unsubs)
-            | set(self._esphome_connection_callback_missing)
         )
         for entry_id in tracked_entry_ids - loaded_entry_ids:
             self._async_remove_esphome_entry(entry_id)
@@ -578,7 +576,6 @@ class ReceiverHub:
         self._esphome_discovery_failures.clear()
         self._esphome_subscription_failures.clear()
         self._esphome_receive_api_missing.clear()
-        self._esphome_connection_callback_missing.clear()
         _LOGGER.debug("Receiver hub stopped")
 
     @callback
@@ -650,57 +647,28 @@ class ReceiverHub:
                             "Error replacing ESPHome connection listener",
                             exc_info=True,
                         )
-                    self._esphome_device_unsubs.pop(entry.entry_id, None)
-                    self._esphome_connection_callback_missing.discard(entry.entry_id)
-                subscribe_updates = getattr(
-                    runtime_data, "async_subscribe_device_updated", None
-                )
-                if subscribe_updates is None:
-                    if (
-                        entry.entry_id
-                        not in self._esphome_connection_callback_missing
-                    ):
-                        self._esphome_connection_callback_missing.add(entry.entry_id)
-                        _LOGGER.warning(
-                            "ESPHome node %s does not expose connection update "
-                            "callbacks; receiver recovery will rely on periodic checks",
-                            entry.title,
+                try:
+                    unsub = runtime_data.async_subscribe_device_updated(
+                        partial(
+                            self._handle_esphome_device_update,
+                            entry.entry_id,
+                            generation,
                         )
+                    )
+                except Exception:  # noqa: BLE001
+                    _LOGGER.exception(
+                        "Could not monitor connection updates for ESPHome node %s",
+                        entry.title,
+                    )
                 else:
-                    try:
-                        unsub = subscribe_updates(
-                            partial(
-                                self._handle_esphome_device_update,
-                                entry.entry_id,
-                                generation,
-                            )
-                        )
-                    except Exception:  # noqa: BLE001
-                        if (
-                            entry.entry_id
-                            not in self._esphome_connection_callback_missing
-                        ):
-                            self._esphome_connection_callback_missing.add(
-                                entry.entry_id
-                            )
-                            _LOGGER.warning(
-                                "Could not monitor connection updates for ESPHome "
-                                "node %s",
-                                entry.title,
-                                exc_info=True,
-                            )
-                    else:
-                        self._esphome_connection_callback_missing.discard(
-                            entry.entry_id
-                        )
-                        self._esphome_device_unsubs[entry.entry_id] = (
-                            runtime_data,
-                            unsub,
-                        )
-                        _LOGGER.debug(
-                            "Tracking connection lifecycle of ESPHome node %s",
-                            entry.title,
-                        )
+                    self._esphome_device_unsubs[entry.entry_id] = (
+                        runtime_data,
+                        unsub,
+                    )
+                    _LOGGER.debug(
+                        "Tracking connection lifecycle of ESPHome node %s",
+                        entry.title,
+                    )
 
             if not getattr(runtime_data, "available", False):
                 if (
@@ -734,7 +702,6 @@ class ReceiverHub:
             | set(self._esphome_receivers)
             | set(self._esphome_receiver_runtime_data)
             | set(self._esphome_disconnect_callbacks)
-            | set(self._esphome_connection_callback_missing)
         )
         for entry_id in tracked_entry_ids - loaded_entry_ids:
             self._async_remove_esphome_entry(entry_id)
@@ -857,7 +824,6 @@ class ReceiverHub:
                 _LOGGER.debug(
                     "Error removing ESPHome connection listener", exc_info=True
                 )
-        self._esphome_connection_callback_missing.discard(entry_id)
 
     async def _async_attach_esphome_entry(
         self, entry_id: str, generation: int
