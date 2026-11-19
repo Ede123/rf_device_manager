@@ -414,17 +414,6 @@ class ReceiverHub:
             if receivers is None:
                 return None
 
-            failures = self._discovery_failures.pop(entry_id, 0)
-            if failures:
-                _LOGGER.info(
-                    "RF receiver discovery on ESPHome node %s recovered after "
-                    "%d failed attempt(s)",
-                    node_name,
-                    failures,
-                )
-            if not receivers:
-                _LOGGER.debug("No RF receiver found on ESPHome node %s", node_name)
-
             # Reject a result if this connection changed while discovery awaited.
             current_entry = self._hass.config_entries.async_get_entry(entry_id)
             if (
@@ -435,6 +424,17 @@ class ReceiverHub:
                 or generation != self._connection_generations.get(entry_id, 0)
             ):
                 return None
+
+            failures = self._discovery_failures.pop(entry_id, 0)
+            if failures:
+                _LOGGER.info(
+                    "RF receiver discovery on ESPHome node %s recovered after "
+                    "%d failed attempt(s)",
+                    node_name,
+                    failures,
+                )
+            if not receivers:
+                _LOGGER.debug("No RF receiver found on ESPHome node %s", node_name)
 
             self._receiver_cache[entry_id] = (
                 runtime_data,
