@@ -334,7 +334,6 @@ class ReceiverHub:
                 )
             return None
 
-        self._discovery_failures.pop(entry_id, None)
         return self._build_receiver_metas(
             info for info in entities if isinstance(info, RadioFrequencyInfo)
         )
@@ -354,6 +353,7 @@ class ReceiverHub:
         )
         runtime_data.disconnect_callbacks.add(disconnect_callback)
         self._disconnect_callbacks[entry_id] = (runtime_data, disconnect_callback)
+        _LOGGER.debug("Tracking disconnect lifecycle of ESPHome node %s", node_name)
 
     @callback
     def _handle_disconnect(
@@ -365,6 +365,10 @@ class ReceiverHub:
             return
         # Home Assistant has already cleared disconnect_callbacks. The old
         # receive unsubscribe handle belongs to the dead API connection.
+        _LOGGER.debug(
+            "ESPHome node %s disconnected; invalidating RF receiver state",
+            node_name,
+        )
         self._async_invalidate_connection(entry_id, node_name)
 
     async def _async_get_receivers(
@@ -378,7 +382,9 @@ class ReceiverHub:
         if cached is not None:
             self._async_invalidate_connection(entry_id, node_name, unsubscribe=True)
 
-        lock = self._discovery_locks.setdefault(entry_id, asyncio.Lock())
+        lock = self._discovery_locks.get(entry_id)
+        if lock is None:
+            lock = self._discovery_locks[entry_id] = asyncio.Lock()
         async with lock:
             cached = self._receiver_cache.get(entry_id)
             if cached is not None and cached[0] is runtime_data and cached[1] is client:
@@ -407,6 +413,17 @@ class ReceiverHub:
                 )
             if receivers is None:
                 return None
+
+            failures = self._discovery_failures.pop(entry_id, 0)
+            if failures:
+                _LOGGER.info(
+                    "RF receiver discovery on ESPHome node %s recovered after "
+                    "%d failed attempt(s)",
+                    node_name,
+                    failures,
+                )
+            if not receivers:
+                _LOGGER.debug("No RF receiver found on ESPHome node %s", node_name)
 
             # Reject a result if this connection changed while discovery awaited.
             current_entry = self._hass.config_entries.async_get_entry(entry_id)
@@ -568,6 +585,10 @@ class ReceiverHub:
             self._async_invalidate_connection(entry_id, node_name)
             return
 
+        _LOGGER.debug(
+            "ESPHome node %s became available; refreshing RF receiver subscription",
+            node_name,
+        )
         self._async_invalidate_connection(entry_id, node_name, unsubscribe=True)
         self._hass.async_create_task(self._async_attach_entry(entry_id, generation))
 
