@@ -154,10 +154,11 @@ polarity is the non-obvious part.
   subscriber and detach on last. ESPHome runtime-data connection callbacks
   invalidate and re-establish receiver subscriptions on disconnect/reconnect;
   a 30s maintenance scan notices newly loaded ESPHome entries and retries failed
-  discovery/subscription attempts. Successfully discovered receiver metadata is
-  cached for the current connection, so a healthy node is not re-enumerated on
-  every scan. `async_discover()` remains an explicit refresh for the learn UI
-  and diagnostics.
+  discovery/subscription attempts. Receiver metadata (including empty
+  results) is cached per ESPHome connection and reused by maintenance,
+  `async_discover()`, the learn UI and diagnostics. ESPHome disconnect callbacks
+  invalidate the cache even while the hub is stopped; failed discovery is not
+  cached and is retried.
 - **`CodeMatcher`** — registered variants `(slot, index, fingerprint, bits, callback)`;
   one hub subscription routes each received capture to the matching entities.
   Matching is **tolerant**: exact fingerprint = distance 0, else decoded-bit
@@ -168,7 +169,12 @@ polarity is the non-obvious part.
   This is essential: sibling remote buttons often differ by a single bit, so a
   received code lands within tolerance of several slots of one entity;
   dispatching all of them would flip state on/off/on/off once per repeated
-  frame. Codes learned before bit-decoding existed only match exactly until
+  frame. **The same holds across the entities of one device**: entities
+  register with `group=device_id`, and per signal only the entities at the
+  group's best distance fire (an exact hit beats near-misses on sibling
+  buttons; identical codes on several entities still all fire). Without this,
+  one press on a remote learned as separate button entities fired every
+  button within tolerance. Codes learned before bit-decoding existed only match exactly until
   re-learned. Per-slot reception is debounced in the entity
   (`RECV_DEBOUNCE_S`) since one press arrives as many repeated frames.
 - **`LearnSession`** — waits for the first signal (timeout), then collects for a
@@ -223,10 +229,11 @@ polarity is the non-obvious part.
     format dropdown. Core 2026.11+ displays only the selected format's editor
     and settings on one page; earlier supported versions use a two-step
     compatibility form. Both paths share selector builders and the parser.
-    Binary/Tri-state use inline `TextSelector(multiple=True)`; Raw/B0/B1/Pronto
-    use repeatable `ObjectSelector` lists with multiline editors. Pulse length and
-    rc-switch protocol appear only for Binary/Tri-state. Repeat is available
-    for every format; 0/unset still invokes `DEFAULT_SEND_REPEAT`.
+    All formats use the same repeatable `ObjectSelector` list and add action.
+    Binary/Tri-state use single-line editors; Raw/B0/B1/Pronto use multiline
+    editors. Pulse length and rc-switch protocol appear only for Binary/Tri-state.
+    Repeat is available for every format; 0/unset still invokes
+    `DEFAULT_SEND_REPEAT`.
   - **No-receiver guard:** `slot_learn` refreshes `hub.async_discover()` and,
     if no receiver is found, routes to `slot_no_receiver` (warn + retry /
     manual / skip) instead of waiting for a signal that can never arrive.
