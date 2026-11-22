@@ -60,17 +60,17 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the module map and data model, and
   `fingerprint` is the key used for receive-matching.
 - **Command slots** are derived from the entity type by
   `models.build_slots(entity_type, settings)`, e.g. switch → `on`/`off`; cover →
-  Each slot stores an ordered list of complete `RFCommandData` variants. The
-  learner filters candidates by reception frequency but retains the first-seen
-  order of the selected signals. Re-learning a slot replaces its full variant
-  list. Legacy storage with one command object is normalized to a one-item
-  list on load. Receive matching registers every variant; sends rotate through
-  the list independently per code/slot. A matched physical-remote reception
-  synchronizes the next send to the following variant. The counter is in
-  memory only and resets to the first variant after a Home Assistant restart.
   `open`/`close`/`stop`; fan → `off`/`speed_1..n`/`oscillate`/direction; select →
-  `option:<name>`; number/sensor → `value:<v>`. Slot keys are the contract
-  between the learn wizard, the platforms, and the matcher.
+  `option:<name>`; number/sensor → `value:<v>`. Each slot stores an ordered list
+  of complete `RFCommandData` variants. The learner filters candidates by
+  reception frequency but retains the first-seen order of the selected signals.
+  Re-learning a slot replaces its full variant list. Legacy storage with one
+  command object is normalized to a one-item list on load. Receive matching
+  registers every variant; sends rotate through the list independently per
+  code/slot. A matched physical-remote reception synchronizes the next send to
+  the following variant. The counter is in memory only and resets to the first
+  variant after a Home Assistant restart. Slot keys are the contract between
+  the learn wizard, the platforms, and the matcher.
 
 Storage: `storage.py` (`RFDeviceStore`, HA Storage API, versioned + migratable).
 Devices/codes are JSON dicts via `to_dict`/`from_dict` (tolerant of missing
@@ -146,7 +146,9 @@ polarity is the non-obvious part.
   `unavailable` (note: `unknown` is a valid "ready" state — a transmitter that
   has never sent reports `unknown`), builds `_StoredCommand`, applies
   `DEFAULT_SEND_REPEAT` (7 extra → 8 frames on air, matching a short button
-  hold) when the command's repeat is 0/unset, then calls the core helper.
+  hold) when the command's repeat is 0/unset, then calls the core helper. Optional
+  log context identifies the originating entity/service/learn step; variant sends
+  also log the slot, selected index/count and fingerprint.
 - **`ReceiverHub`** — multiplexes captures from all sources to subscribers.
   Sources: ESPHome nodes (native API `subscribe_infrared_rf_receive`, discovered
   via `list_entities_services()` because core does not cache RF *receiver*
