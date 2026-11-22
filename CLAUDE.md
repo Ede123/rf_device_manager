@@ -84,8 +84,8 @@ the `DECODERS` chain **in order**; first structural match wins:
 | Decoder | Structure | Examples |
 |---|---|---|
 | `space_distance` | constant mark, short/long space | EV1527, PT2262 |
-| `mark_width` | constant space, short/long mark | SIRC-style |
-| `pwm` | mark+space share the bit (rc-switch) | rc-switch P1–5, P7, P8 (+ guess) |
+| `mark_width` | constant space, short/long mark | SIRC-style, rc-switch P8 |
+| `pwm` | mark+space share the bit (rc-switch) | rc-switch P1–5, P7 (+ guess) |
 | `manchester` | every bit is a level transition | Oregon, some fans |
 
 Detection is **structural, not a protocol database** — unknown remotes decode as
@@ -108,9 +108,10 @@ transition). Don't "simplify" that away.
 - `normalize()` = `ensure_signed` → `remove_glitches` (merge sub-80µs spikes) →
   `trim_idle`. Run before anything else.
 - `split_frames()` cuts on the inter-frame gap. Threshold is adaptive:
-  `max(2400µs, 1.7 × 95th-percentile pulse)` — tuned so short (~2.8ms) EV1527
-  sync gaps are recognized. Changing these constants changes what counts as a
-  frame boundary; retest against `tests/test_decoders.py`.
+  `max(2000µs, 1.7 × 95th-percentile pulse)` — admits the 2.28ms rc-switch
+  protocol-4 sync gap while keeping longer in-frame spaces (e.g. protocol-8
+  data LOWs) intact. Changing these constants changes what counts as a frame
+  boundary; retest against `tests/test_decoders.py`.
 - `fingerprint()` = hash of decoded bits when decodable (jitter-immune,
   `"<n>b:<sha>"`), else quantized-frame hash (`"<n>:<sha>"`). **Fingerprints are
   the receive-matching key**; if you change fingerprinting, stored codes stop
