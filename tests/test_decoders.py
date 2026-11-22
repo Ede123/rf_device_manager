@@ -385,7 +385,7 @@ for protocol in rf_analysis.RC_PROTOCOLS:
         decoded.get("bits") == ROTATING_BITS,
         f"rc-switch P{protocol}: binary bits did not round-trip",
     )
-    if protocol in {1, 2, 4, 5, 7}:
+    if protocol in {1, 2, 4, 5, 7, 8}:
         check(
             decoded.get("protocol_guess") == protocol,
             f"rc-switch P{protocol}: expected protocol guess {protocol}, "
@@ -402,11 +402,40 @@ for protocol in rf_analysis.RC_PROTOCOLS:
         == "".join(rf_analysis.TRISTATE_TO_BITS[symbol] for symbol in tristate_code),
         f"rc-switch P{protocol}: tri-state bits did not round-trip",
     )
-    if protocol in {1, 2, 4, 5, 7}:
+    if protocol in {1, 2, 4, 5, 7, 8}:
         check(
             tristate_decoded.get("protocol_guess") == protocol,
             f"rc-switch P{protocol}: tri-state protocol guess was "
             f"{tristate_decoded.get('protocol_guess')!r}",
+        )
+
+# Protocol 8 recognition must be based on ratios, not its default 200 µs pulse.
+for pulse_length in (120, 250, 400):
+    for timings, expected_bits in (
+        (
+            rf_analysis.encode_binary(
+                ROTATING_BITS, pulse_length=pulse_length, protocol=8
+            ),
+            ROTATING_BITS,
+        ),
+        (
+            rf_analysis.encode_tristate(
+                "0F1F00110F1F", pulse_length=pulse_length, protocol=8
+            ),
+            "".join(
+                rf_analysis.TRISTATE_TO_BITS[symbol]
+                for symbol in "0F1F00110F1F"
+            ),
+        ),
+    ):
+        decoded = rf_analysis.analyze(timings)
+        check(
+            decoded.get("bits") == expected_bits
+            and decoded.get("protocol_guess") == 8
+            and decoded.get("pulse_length") == pulse_length,
+            f"rc-switch P8 at {pulse_length} µs: expected protocol-aware "
+            f"round-trip and base pulse length, got P{decoded.get('protocol_guess')!r}, "
+            f"{decoded.get('bits')!r}, and {decoded.get('pulse_length')!r} µs",
         )
 
 try:
@@ -429,6 +458,7 @@ check(
 #    split its four 24-bit frames with the verified 2,000 µs threshold.
 # ---------------------------------------------------------------------------
 
+ROTATING_BITS = "101010101010101010101010"
 rotating_timings = rf_analysis.encode_binary(
     ROTATING_BITS, pulse_length=380, protocol=4
 )
@@ -590,7 +620,6 @@ check(
     all(frame[-1] == -26_000 for frame in protocol_8_frames),
     "Synthetic Protocol 8: expected each frame to end at its 26,000 µs sync LOW",
 )
-
 if failures:
     print("\nFAILURES:")
     print("\n".join(failures))
