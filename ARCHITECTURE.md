@@ -167,8 +167,11 @@ Senden/Empfangen eines Befehls die Rotation aller *anderen* Befehle des Geräts
 auf die erste Variante zurück (Fernbedienungen, die die Codefolge einer Taste
 beim Drücken einer anderen neu starten). Der eigentliche Versand läuft
 über `_StoredCommand(RadioFrequencyCommand)` und
-`radio_frequency.async_send_command()` zum ESPHome-Transmitter. Die Verfügbarkeit
-der Entities folgt dem Transmitter-State (`async_track_state_change_event`).
+`radio_frequency.async_send_command()` zum ESPHome-Transmitter. Stateful Entities
+bleiben bei aktivem Code/Gerät auch ohne verfügbaren Transmitter verfügbar;
+Empfang aktualisiert ihren Zustand weiterhin. Sende-Aktionen prüfen den
+Transmitter vor optimistischen Zustandsänderungen. Stateless Buttons behalten
+ihre vom Transmitter abhängige Verfügbarkeit.
 
 **Anlernen (Options Flow):** Schrittanzeige je Slot („Schritt 2/4 – Code für
 ‚Schließen‘“) → `async_show_progress` mit LearnSession-Task („Warte auf RF-Signal…“)

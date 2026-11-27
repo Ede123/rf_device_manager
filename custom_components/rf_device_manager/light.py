@@ -96,6 +96,8 @@ class RFLight(RFCodeEntity, LightEntity):
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the light on, optionally stepping to a brightness."""
         was_on = self._attr_is_on
+        if not was_on:
+            self._ensure_transmitter_available()
         self._attr_is_on = True
         self.async_write_ha_state()  # optimistic state first for instant UI
         if not was_on:
@@ -111,9 +113,12 @@ class RFLight(RFCodeEntity, LightEntity):
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the light off (falls back to the on/toggle command)."""
         was_on = self._attr_is_on
+        toggle_power = self._on_toggles_power()
+        if not toggle_power or was_on:
+            self._ensure_transmitter_available()
         self._attr_is_on = False
         self.async_write_ha_state()
-        if not self._on_toggles_power():
+        if not toggle_power:
             await self._async_send_slot(SLOT_OFF)
         elif was_on:  # a toggle press while off would switch it on
             await self._async_send_slot(SLOT_ON)

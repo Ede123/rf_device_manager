@@ -72,6 +72,7 @@ class RFNumber(RFCodeEntity, RestoreNumber, NumberEntity):
 
     async def async_set_native_value(self, value: float) -> None:
         """Snap to the nearest configured value and send its command."""
+        self._ensure_transmitter_available()
         nearest = min(self._values, key=lambda candidate: abs(candidate - value))
         self._attr_native_value = nearest
         self.async_write_ha_state()  # optimistic state first for instant UI

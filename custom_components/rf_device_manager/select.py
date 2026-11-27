@@ -55,6 +55,7 @@ class RFSelect(RFCodeEntity, SelectEntity):
 
     async def async_select_option(self, option: str) -> None:
         """Send the command mapped to the chosen option."""
+        self._ensure_transmitter_available()
         self._attr_current_option = option
         self.async_write_ha_state()  # optimistic state first for instant UI
         await self._async_send_slot(f"{SLOT_OPTION_PREFIX}{option}")

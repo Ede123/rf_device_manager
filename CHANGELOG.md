@@ -7,6 +7,9 @@ All notable changes to RF Device Manager. Versions follow the `version` in
 
 ### Fixed
 
+- **Stateful RF entities retain their last known state when the transmitter is offline.**
+  Received RF commands can still update that state; state-changing send actions
+  are rejected before their optimistic state update when transmission is unavailable.
 - **Toggle-only power buttons** (switch/light with an *On* but no *Off*
   command): a press of the physical remote now flips the state instead of
   always reporting *on*, and Home Assistant no longer sends the toggle when the

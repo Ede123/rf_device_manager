@@ -66,18 +66,21 @@ class RFCover(RFCodeEntity, CoverEntity):
 
     async def async_open_cover(self, **kwargs: Any) -> None:
         """Send the open command (optimistic state first for instant UI)."""
+        self._ensure_transmitter_available()
         self._attr_is_closed = False
         self.async_write_ha_state()
         await self._async_send_slot(SLOT_OPEN)
 
     async def async_close_cover(self, **kwargs: Any) -> None:
         """Send the close command."""
+        self._ensure_transmitter_available()
         self._attr_is_closed = True
         self.async_write_ha_state()
         await self._async_send_slot(SLOT_CLOSE)
 
     async def async_stop_cover(self, **kwargs: Any) -> None:
         """Send the stop command; the resulting position is unknown."""
+        self._ensure_transmitter_available()
         self._attr_is_closed = None
         self.async_write_ha_state()
         await self._async_send_slot(SLOT_STOP)

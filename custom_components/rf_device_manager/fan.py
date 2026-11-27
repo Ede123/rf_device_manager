@@ -102,6 +102,7 @@ class RFFan(RFCodeEntity, FanEntity):
 
     async def async_set_percentage(self, percentage: int) -> None:
         """Send the speed command closest to the requested percentage."""
+        self._ensure_transmitter_available()
         if percentage == 0 or not self._speed_slots:
             self._attr_percentage = 0
             self.async_write_ha_state()  # optimistic state first
@@ -127,18 +128,21 @@ class RFFan(RFCodeEntity, FanEntity):
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Send the off command."""
+        self._ensure_transmitter_available()
         self._attr_percentage = 0
         self.async_write_ha_state()
         await self._async_send_slot(SLOT_OFF)
 
     async def async_oscillate(self, oscillating: bool) -> None:
         """Send the oscillation toggle command."""
+        self._ensure_transmitter_available()
         self._attr_oscillating = oscillating
         self.async_write_ha_state()
         await self._async_send_slot(SLOT_OSCILLATE)
 
     async def async_set_direction(self, direction: str) -> None:
         """Send the matching direction command."""
+        self._ensure_transmitter_available()
         self._attr_current_direction = (
             DIRECTION_REVERSE if direction == DIRECTION_REVERSE else DIRECTION_FORWARD
         )

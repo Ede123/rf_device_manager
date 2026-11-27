@@ -259,8 +259,11 @@ from a real Sonoff Bridge code, see the B0 test).
   invert the device). With an `off` command, `on`/`off` stay absolute.
 - **Attributes:** `commands` (first variant summary per slot, kept for
   backward compatibility) and `command_variants` (all variants).
-- **Availability:** send entities follow the transmitter state; receive-only
-  entities ignore it.
+- **Availability:** stateful RF code entities follow their code/device enabled
+  state, not transmitter availability. Received RF commands can still update
+  state offline; state-changing send actions check the transmitter before
+  changing optimistic state. Stateless buttons retain transmitter-dependent
+  availability.
 
 ## 8. Config/Options flow (config_flow.py)
 
